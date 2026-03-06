@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Worklog</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+  <link id="favicon" rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23111111'/%3E%3Ctext x='50' y='62' font-size='58' text-anchor='middle' fill='%23ffffff' font-family='Arial'%3EW%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+  <div id="app" class="app">
+    <section id="login-screen" class="screen centered hidden">
+      <div class="login-card">
+        <div class="login-header">
+          <div class="badge">Local Worklog</div>
+          <h1>Worklog</h1>
+          <p>Lightweight hourly logging for transparent, flexible work.</p>
+          <p style="margin-top: 1rem; color: var(--accent);">Running in local mode - all data is stored in your browser.</p>
+        </div>
+        <!-- Hidden elements for JS compatibility -->
+        <input id="pat-input" type="hidden" />
+        <button id="login-btn" style="display: none;"></button>
+      </div>
+    </section>
+
+    <section id="main-screen" class="screen hidden">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-title">Worklog</div>
+        </div>
+
+        <div class="topbar-right">
+          <label class="interval-control hidden" title="Log interval">
+            <span>Interval</span>
+            <input id="interval-input" type="number" min="1" max="120" step="1" value="60" />
+            <span>m</span>
+          </label>
+          <div id="pomodoro-counter" class="counter pomodoro-counter hidden" title="Pomodoro sessions today">🍅 0</div>
+          <button id="projects-btn" class="counter" style="background: var(--accent); color: #fff; border-color: var(--accent);" title="Manage projects (M)">📁 Projects</button>
+          <button id="add-log-btn" class="counter" style="background: var(--accent); color: #fff; border-color: var(--accent);" title="Add a log entry (A)">+ Add Log</button>
+          <button id="counter" class="counter" title="Log now">Worked: 00m00s</button>
+          <div id="today-hours" class="counter today-hours" title="Hours logged today">Today: 0h</div>
+          <button id="pause-btn" class="icon-btn" title="Pause" aria-label="Pause">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="6" y="5" width="4" height="14" fill="currentColor"></rect>
+              <rect x="14" y="5" width="4" height="14" fill="currentColor"></rect>
+            </svg>
+          </button>
+          <button id="user-pill" class="user-pill user-pill-button" title="View statistics" aria-label="View statistics">
+            <img id="user-avatar" alt="" />
+            <span id="user-name">@user</span>
+          </button>
+          <button id="stats-btn" class="icon-btn" title="Statistics" aria-label="Statistics">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 3v18h18"></path>
+              <path d="M18 17V9"></path>
+              <path d="M13 17V5"></path>
+              <path d="M8 17v-3"></path>
+            </svg>
+          </button>
+          <button id="reports-btn" class="icon-btn" title="Reports" aria-label="Reports">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+          </button>
+          <button id="export-btn" class="icon-btn" title="Export/Import" aria-label="Export/Import">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+          </button>
+          <button id="logout-btn" class="icon-btn" title="Clear all data" aria-label="Clear all data">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+          </button>
+          <button id="settings-btn" class="icon-btn" title="Settings" aria-label="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M12 1v6m0 6v6M1 12h6m6 0h6"></path>
+              <path d="M19.07 4.93l-4.24 4.24m0 5.66l4.24 4.24M4.93 4.93l4.24 4.24m0 5.66l-4.24 4.24"></path>
+            </svg>
+          </button>
+          <button id="help-btn" class="icon-btn help-btn" title="About Worklog" aria-label="About Worklog">?</button>
+        </div>
+      </header>
+
+      <main class="main">
+        <div class="log-shell">
+          <div class="log-header">
+            <div class="tab-bar">
+              <button id="tab-logs" class="tab-btn active">Logs</button>
+              <span class="tab-separator">|</span>
+              <button id="tab-timeline" class="tab-btn">Timeline</button>
+            </div>
+            <div id="tz-indicator" class="tz-indicator" title="Times shown in your local timezone">TZ: Local</div>
+          </div>
+
+          <div id="logs-view" class="logs-view">
+            <div class="logs-controls">
+              <input id="search-input" type="text" placeholder="Search logs..." class="search-input" />
+              <select title="categories" id="filter-category" class="filter-select">
+                <option value="">All Categories</option>
+              </select>
+              <select title="projects" id="filter-project" class="filter-select">
+                <option value="">All Projects</option>
+              </select>
+              <button id="clear-filters" class="filter-btn">Clear</button>
+            </div>
+            <div id="log-container" class="log-container">
+              <div id="log-loading" class="log-loading">Loading logs...</div>
+              <div id="log-list" class="log-list"></div>
+              <div id="log-empty" class="log-empty hidden">No logs yet.</div>
+            </div>
+          </div>
+
+          <div id="timeline-view" class="timeline-view hidden">
+          <div class="timeline-controls">
+            <div class="timeline-scales">
+              <button class="scale-btn active" data-scale="daily">Daily</button>
+              <button class="scale-btn" data-scale="weekly">Weekly</button>
+              <button class="scale-btn" data-scale="monthly">Monthly</button>
+              <button class="scale-btn" data-scale="yearly">Yearly</button>
+            </div>
+            <div id="timeline-total" class="counter timeline-total" title="Total logged for selected period">Today: 0h</div>
+          </div>
+            <div id="timeline-scroll" class="timeline-scroll">
+              <div id="timeline-canvas" class="timeline-canvas">
+                <div id="timeline-grid" class="timeline-grid"></div>
+                <div id="timeline-labels" class="timeline-labels"></div>
+                <div id="timeline-rows" class="timeline-rows"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </section>
+  </div>
+
+      <div id="log-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>What you're working on?</h2>
+        <button class="modal-close" data-close aria-label="Close">&times;</button>
+      </div>
+      <div class="log-fields">
+        <label class="log-field">
+          <span>Date</span>
+          <input id="log-date" type="date" />
+        </label>
+        <label class="log-field">
+          <span>End time</span>
+          <input id="log-time" type="time" step="60" />
+        </label>
+        <div class="log-field">
+          <span>Duration</span>
+          <div class="log-duration">
+            <input id="log-hours" type="number" min="0" step="1" />
+            <span>h</span>
+            <input id="log-minutes" type="number" min="0" max="59" step="1" />
+            <span>m</span>
+          </div>
+        </div>
+      </div>
+      <div class="log-fields-enhanced">
+        <label class="log-field">
+          <span>Project</span>
+          <select id="log-project">
+            <option value="">No project</option>
+          </select>
+        </label>
+        <label class="log-field">
+          <span>Category</span>
+          <select id="log-category">
+            <option value="coding">💻 Coding</option>
+            <option value="meeting">👥 Meeting</option>
+            <option value="research">🔍 Research</option>
+            <option value="review">👀 Code Review</option>
+            <option value="documentation">📝 Documentation</option>
+            <option value="planning">📋 Planning</option>
+            <option value="debugging">🐛 Debugging</option>
+            <option value="testing">🧪 Testing</option>
+            <option value="learning">📚 Learning</option>
+            <option value="break">☕ Break</option>
+            <option value="other">📌 Other</option>
+          </select>
+        </label>
+        <label class="log-field">
+          <span>Energy</span>
+          <select id="log-energy">
+            <option value="high">⚡ High</option>
+            <option value="medium" selected>🔋 Medium</option>
+            <option value="low">🪫 Low</option>
+          </select>
+        </label>
+      </div>
+      <div id="log-error" class="log-error hidden"></div>
+      <textarea id="log-text" rows="4" placeholder="e.g. debugging race condition on HVM's collapser.c"></textarea>
+      <div class="modal-actions log-modal-actions">
+        <div id="log-queue-meta" class="log-queue-meta"></div>
+        <div class="log-modal-buttons">
+          <button id="cancel-log" class="danger">Erase</button>
+          <button id="register-log" class="primary">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="help-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>About Worklog</h2>
+      </div>
+      <div class="help-text">
+        <p><strong>Worklog</strong> is a lightweight activity log for tracking your work time. When you're working, keep this tab open.</p>
+        <p>Every full interval (default 60 minutes, configurable), you will hear a beep and a modal will ask for a short note on what you worked on. Press <strong>Send</strong> to save it locally. If you forgot the tab open, press <strong>Erase</strong> to discard that time.</p>
+        <p>You can pause/resume at any time. Closing the tab ends the session.</p>
+
+        <p><strong>🔒 Local Mode:</strong> All your logs are stored in your browser's local storage. No data is sent to any server.</p>
+
+        <p><strong>✨ Features:</strong></p>
+        <ul style="margin: 8px 0 16px 20px; line-height: 1.7;">
+          <li><strong>Statistics:</strong> View your work patterns and totals</li>
+          <li><strong>Export:</strong> Download your logs as JSON or CSV</li>
+          <li><strong>Import:</strong> Restore logs from a previous export</li>
+          <li><strong>Timeline:</strong> Visualize your work hours over time</li>
+        </ul>
+
+        <p><strong>⌨️ Keyboard Shortcuts:</strong></p>
+        <ul style="margin: 8px 0; padding-left: 20px; line-height: 1.7;">
+          <li><strong>?</strong> - Toggle interval control visibility</li>
+          <li><strong>Space</strong> - Pause/Resume timer</li>
+          <li><strong>A</strong> - Add log entry (independent of timer)</li>
+          <li><strong>L</strong> - Log current elapsed time (resets timer)</li>
+          <li><strong>S</strong> - Show statistics</li>
+          <li><strong>R</strong> - View reports (daily/weekly/monthly)</li>
+          <li><strong>E</strong> - Export/Import data</li>
+          <li><strong>C</strong> - Settings (includes Pomodoro)</li>
+          <li><strong>M</strong> - Manage projects</li>
+        </ul>
+      </div>
+      <div class="modal-actions">
+        <button class="primary" data-close>Got it</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="projects-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card modal-card-large">
+      <div class="modal-header">
+        <h2>📁 Projects</h2>
+        <button class="modal-close" data-close aria-label="Close">&times;</button>
+      </div>
+
+      <div class="help-text">
+        <div class="projects-toolbar">
+          <button id="create-project-btn" class="primary">+ New Project</button>
+        </div>
+
+        <div id="projects-list" class="projects-list">
+          <!-- Projects will be dynamically inserted here -->
+        </div>
+
+        <div id="project-form" class="project-form hidden">
+          <h3 id="project-form-title">Create New Project</h3>
+
+          <label class="settings-field">
+            <span>Project Name *</span>
+            <input id="project-name" type="text" placeholder="e.g., Auth Feature" required />
+          </label>
+
+          <label class="settings-field">
+            <span>Description</span>
+            <textarea id="project-description" rows="3" placeholder="Optional project description"></textarea>
+          </label>
+
+          <div class="modal-actions">
+            <button id="save-project-btn" class="primary">Save Project</button>
+            <button id="cancel-project-btn">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="primary" data-close>Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="stats-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>📊 Statistics</h2>
+      </div>
+      <div id="stats-content" class="help-text">
+        <p>Loading statistics...</p>
+      </div>
+      <div class="modal-actions">
+        <button class="primary" data-close>Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="settings-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card modal-card-large">
+      <div class="modal-header">
+        <h2>⚙️ Settings</h2>
+        <button class="modal-close" data-close aria-label="Close">&times;</button>
+      </div>
+
+      <div class="settings-container">
+        <div class="settings-tabs">
+          <button class="settings-tab active" data-tab="defaults">Defaults</button>
+          <button class="settings-tab" data-tab="goals">Goals</button>
+          <button class="settings-tab" data-tab="pomodoro">Pomodoro</button>
+          <button class="settings-tab" data-tab="preferences">Preferences</button>
+        </div>
+
+        <div class="settings-content">
+          <!-- Defaults Tab -->
+          <div id="settings-defaults" class="settings-panel active">
+            <h3>Default Values</h3>
+            <p class="settings-hint">Set defaults for new log entries</p>
+
+            <div class="settings-group">
+              <label class="settings-field">
+                <span>Default Project</span>
+                <select id="settings-default-project">
+                  <option value="">No default</option>
+                </select>
+              </label>
+
+              <label class="settings-field">
+                <span>Default Category</span>
+                <select id="settings-default-category">
+                  <option value="">No default</option>
+                  <option value="coding">💻 Coding</option>
+                  <option value="meeting">👥 Meeting</option>
+                  <option value="research">🔍 Research</option>
+                  <option value="review">👀 Code Review</option>
+                  <option value="documentation">📝 Documentation</option>
+                  <option value="planning">📋 Planning</option>
+                  <option value="debugging">🐛 Debugging</option>
+                  <option value="testing">🧪 Testing</option>
+                  <option value="learning">📚 Learning</option>
+                  <option value="break">☕ Break</option>
+                  <option value="other">📌 Other</option>
+                </select>
+              </label>
+
+              <label class="settings-field">
+                <span>Default Energy Level</span>
+                <select id="settings-default-energy">
+                  <option value="">No default</option>
+                  <option value="high">⚡ High</option>
+                  <option value="medium">🔋 Medium</option>
+                  <option value="low">🪫 Low</option>
+                </select>
+              </label>
+
+              <label class="settings-field">
+                <span>Default Interval (minutes)</span>
+                <input id="settings-default-interval" type="number" min="1" max="120" value="60" />
+              </label>
+            </div>
+          </div>
+
+          <!-- Goals Tab -->
+          <div id="settings-goals" class="settings-panel">
+            <h3>Work Goals</h3>
+            <p class="settings-hint">Set your daily, weekly, and monthly targets</p>
+
+            <div class="settings-group">
+              <label class="settings-field">
+                <div class="settings-field-header">
+                  <span>Daily Goal (hours)</span>
+                  <input type="checkbox" id="settings-daily-enabled" checked />
+                </div>
+                <input id="settings-daily-hours" type="number" min="0" max="24" step="0.5" value="8" />
+              </label>
+
+              <label class="settings-field">
+                <div class="settings-field-header">
+                  <span>Weekly Goal (hours)</span>
+                  <input type="checkbox" id="settings-weekly-enabled" checked />
+                </div>
+                <input id="settings-weekly-hours" type="number" min="0" max="168" step="1" value="40" />
+              </label>
+
+              <label class="settings-field">
+                <div class="settings-field-header">
+                  <span>Monthly Goal (hours)</span>
+                  <input type="checkbox" id="settings-monthly-enabled" />
+                </div>
+                <input id="settings-monthly-hours" type="number" min="0" max="744" step="1" value="160" />
+              </label>
+            </div>
+          </div>
+
+          <!-- Pomodoro Tab -->
+          <div id="settings-pomodoro-tab" class="settings-panel">
+            <h3>🍅 Pomodoro Settings</h3>
+            <p class="settings-hint">Work in focused intervals with regular breaks</p>
+
+            <div class="settings-group">
+              <label class="settings-field">
+                <div class="settings-field-header">
+                  <span>Enable Pomodoro Mode</span>
+                  <input type="checkbox" id="settings-pomodoro-enabled" />
+                </div>
+              </label>
+
+              <label class="settings-field">
+                <span>Work Duration (minutes)</span>
+                <input id="settings-pomodoro-work" type="number" min="5" max="60" step="5" value="25" />
+              </label>
+
+              <label class="settings-field">
+                <span>Short Break (minutes)</span>
+                <input id="settings-pomodoro-short-break" type="number" min="3" max="15" step="1" value="5" />
+              </label>
+
+              <label class="settings-field">
+                <span>Long Break (minutes)</span>
+                <input id="settings-pomodoro-long-break" type="number" min="10" max="30" step="5" value="15" />
+              </label>
+
+              <label class="settings-field">
+                <span>Sessions Until Long Break</span>
+                <input id="settings-pomodoro-sessions" type="number" min="2" max="8" step="1" value="4" />
+              </label>
+            </div>
+
+            <div class="stat-card" style="margin-top: 20px;">
+              <div class="stat-title">📊 Your Pomodoro Stats</div>
+              <div class="stat-row">
+                <span>Today</span>
+                <span id="pomodoro-today-count">0 sessions</span>
+              </div>
+              <div class="stat-row">
+                <span>Total</span>
+                <span id="pomodoro-total-count">0 sessions</span>
+              </div>
+              <div class="stat-row">
+                <span>Average/Day (7d)</span>
+                <span id="pomodoro-avg-count">0.0</span>
+              </div>
+            </div>
+
+            <p style="margin-top: 16px; font-size: 0.85rem; color: var(--muted); line-height: 1.5;">
+              <strong>How it works:</strong> Enable Pomodoro mode to switch to shorter work intervals with automatic break reminders. Perfect for maintaining focus and preventing burnout.
+            </p>
+          </div>
+
+          <!-- Preferences Tab -->
+          <div id="settings-preferences" class="settings-panel">
+            <h3>Preferences</h3>
+            <p class="settings-hint">Customize your Worklog experience</p>
+
+            <div class="settings-group">
+              <label class="settings-field">
+                <div class="settings-field-header">
+                  <span>Sound Enabled</span>
+                  <input type="checkbox" id="settings-sound-enabled" checked />
+                </div>
+              </label>
+
+              <label class="settings-field">
+                <div class="settings-field-header">
+                  <span>Desktop Notifications</span>
+                  <input type="checkbox" id="settings-notifications-enabled" checked />
+                </div>
+              </label>
+
+              <label class="settings-field">
+                <div class="settings-field-header">
+                  <span>Auto-Save Drafts</span>
+                  <input type="checkbox" id="settings-autosave-enabled" checked />
+                </div>
+              </label>
+
+              <label class="settings-field">
+                <div class="settings-field-header">
+                  <span>Show Interval Control</span>
+                  <input type="checkbox" id="settings-show-interval" />
+                </div>
+              </label>
+
+              <label class="settings-field">
+                <div class="settings-field-header">
+                  <span>Track Energy Levels</span>
+                  <input type="checkbox" id="settings-track-energy" checked />
+                </div>
+              </label>
+
+              <label class="settings-field">
+                <div class="settings-field-header">
+                  <span>Track Categories</span>
+                  <input type="checkbox" id="settings-track-category" checked />
+                </div>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button id="settings-save" class="primary">Save Settings</button>
+        <button id="settings-reset">Reset to Defaults</button>
+        <button data-close>Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="export-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>💾 Export & Import</h2>
+        <button class="modal-close" data-close aria-label="Close">&times;</button>
+      </div>
+      <div class="help-text">
+        <p><strong>Export your data:</strong></p>
+        <div class="modal-actions" style="margin-top: 12px; margin-bottom: 24px;">
+          <button id="export-json-btn" class="primary">Export as JSON</button>
+          <button id="export-csv-btn">Export as CSV</button>
+        </div>
+
+        <p><strong>Import data:</strong></p>
+        <input type="file" id="import-file" accept=".json" style="margin-top: 12px; margin-bottom: 12px;" />
+        <div class="modal-actions">
+          <button id="import-btn">Import from JSON</button>
+        </div>
+
+        <p style="margin-top: 24px; font-size: 0.85rem; color: var(--muted);">
+          <strong>Note:</strong> Importing will merge with existing logs. Backup your data before importing.
+        </p>
+      </div>
+      <div class="modal-actions">
+        <button class="primary" data-close>Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="reports-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card modal-card-large">
+      <div class="modal-header">
+        <h2>📊 Reports</h2>
+        <button class="modal-close" data-close aria-label="Close">&times;</button>
+      </div>
+
+      <div class="help-text">
+        <div class="reports-controls">
+          <div class="reports-type-selector">
+            <button class="reports-type-btn active" data-type="daily">Daily</button>
+            <button class="reports-type-btn" data-type="weekly">Weekly</button>
+            <button class="reports-type-btn" data-type="monthly">Monthly</button>
+          </div>
+
+          <div class="reports-date-controls">
+            <button id="reports-prev" class="icon-btn" title="Previous period">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+            </button>
+            <div id="reports-date-display" class="reports-date-display">Today</div>
+            <button id="reports-next" class="icon-btn" title="Next period">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="9 18 15 12 9 6"></polyline>
+              </svg>
+            </button>
+            <button id="reports-today" class="filter-btn">Today</button>
+          </div>
+        </div>
+
+        <div id="reports-content" class="reports-content">
+          <!-- Report content will be dynamically inserted here -->
+          <p>Loading report...</p>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button id="reports-export" class="primary">Export Report</button>
+        <button data-close>Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-container" class="toast-container"></div>
+  <div id="timeline-tooltip" class="timeline-tooltip hidden"></div>
+
+  <script src="js/enhanced.js"></script>
+  <script src="js/time.js"></script>
+  <script src="js/cache.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
