@@ -49,18 +49,6 @@ Simply open `index.html` in your browser.
 4. All logs stored locally in your browser (IndexedDB)
 5. View statistics, reports, and timelines anytime
 
-## Keyboard Shortcuts
-
-- `Space` - Pause/Resume
-- `A` - Add log (independent of timer)
-- `L` - Log current time
-- `M` - Manage projects
-- `C` - Settings
-- `R` - Reports
-- `S` - Statistics
-- `E` - Export/Import
-- `?` - Toggle interval control
-
 ## Data Storage
 
 All data is stored locally in your browser using:
@@ -69,7 +57,3 @@ All data is stored locally in your browser using:
 - **LocalStorage** for settings, projects, and metadata
 
 Your data never leaves your computer.
-
-## License
-
-MIT
