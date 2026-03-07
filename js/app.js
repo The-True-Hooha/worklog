@@ -534,16 +534,14 @@ const App = {
             this.elapsedMs = data.elapsed;
           }
           this.isPaused = data.paused === true;
-          // NO MORE QUEUE - ignore old queue data
           this.lastSavedTimer = null;
           return;
         }
       } catch (err) {
-        console.error('Failed to load timer state:', err);
+        this.toast(`load timer state failed: ${err.message}`, "error");
       }
     }
 
-    // Fallback to old storage format
     const elapsed = Number(localStorage.getItem(this.storage.elapsed));
     const paused = localStorage.getItem(this.storage.paused);
 
@@ -598,7 +596,6 @@ const App = {
     const data = {
       elapsed: Math.floor(this.elapsedMs),
       paused: this.isPaused
-      // NO MORE QUEUE - removed queue property
     };
     const packed = JSON.stringify(data);
     if (this.lastSavedTimer === packed) return;
@@ -614,44 +611,34 @@ const App = {
   },
 
   async ensureCacheReady() {
-    console.log('🔧 ensureCacheReady - cacheEnabled:', this.cacheEnabled);
-
     if (!this.cacheEnabled) {
-      console.error('🔧 ensureCacheReady - Cache is DISABLED!');
       return false;
     }
 
     if (!this.cacheInitPromise) {
-      console.log('🔧 ensureCacheReady - Initializing cache...');
 
       if (typeof window === 'undefined') {
-        console.error('🔧 ensureCacheReady - window is undefined!');
         this.cacheEnabled = false;
         return false;
       }
 
       if (!window.LogCache) {
-        console.error('🔧 ensureCacheReady - window.LogCache is undefined! Is cache.js loaded?');
         this.cacheEnabled = false;
         return false;
       }
 
       if (!LogCache.isSupported()) {
-        console.error('🔧 ensureCacheReady - IndexedDB not supported in this browser!');
         this.cacheEnabled = false;
         return false;
       }
 
-      console.log('🔧 ensureCacheReady - Opening IndexedDB...');
       this.cacheInitPromise = LogCache.open().catch(err => {
-        console.error('🔧 ensureCacheReady - LogCache.open() FAILED:', err);
         this.cacheEnabled = false;
         return null;
       });
     }
 
     const db = await this.cacheInitPromise;
-    console.log('🔧 ensureCacheReady - DB ready?', !!db);
     return !!db;
   },
 
@@ -698,18 +685,14 @@ const App = {
   },
 
   async loadLogsFromCache() {
-    console.log('📂 loadLogsFromCache - Starting...');
     if (!(await this.ensureCacheReady())) {
-      console.error('📂 loadLogsFromCache - Cache not ready!');
       return false;
     }
 
     try {
       const cached = await LogCache.getAllLogs();
-      console.log('📂 loadLogsFromCache - Retrieved from IndexedDB:', cached?.length || 0, 'logs');
 
       if (!Array.isArray(cached) || cached.length === 0) {
-        console.warn('📂 loadLogsFromCache - No logs found in cache');
         return false;
       }
 
@@ -725,8 +708,6 @@ const App = {
         loaded += 1;
       }
 
-      console.log('📂 loadLogsFromCache - Loaded', loaded, 'logs into memory');
-
       if (loaded === 0) {
         return false;
       }
@@ -735,16 +716,13 @@ const App = {
       this.renderLogs();
       return true;
     } catch (err) {
-      console.error('📂 loadLogsFromCache - ERROR:', err);
       this.toast(`Import failed: ${err.message}`, 'error');
       return false;
     }
   },
 
   async saveLogsToCache(logs, { replace = false } = {}) {
-    console.log('💾 saveLogsToCache - Starting...', logs?.length || 0, 'logs, replace:', replace);
     if (!(await this.ensureCacheReady())) {
-      console.error('💾 saveLogsToCache - Cache not ready!');
       return;
     }
 
@@ -752,19 +730,13 @@ const App = {
       .map(log => this.serializeLogForCache(log))
       .filter(item => item && item.path);
 
-    console.log('💾 saveLogsToCache - Serialized', items.length, 'items');
-
     try {
       if (replace) {
-        console.log('💾 saveLogsToCache - Replacing all logs in IndexedDB');
         await LogCache.replaceAllLogs(items);
       } else if (items.length > 0) {
-        console.log('💾 saveLogsToCache - Putting', items.length, 'logs to IndexedDB');
         await LogCache.putLogs(items);
       }
-      console.log('💾 saveLogsToCache - SUCCESS! Logs saved to IndexedDB');
     } catch (err) {
-      console.error('💾 saveLogsToCache - ERROR:', err);
       this.toast(`Failed to save: ${err.message}`, 'error');
     }
   },
