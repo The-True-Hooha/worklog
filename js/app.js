@@ -1,5 +1,5 @@
-// Main Worklog app
 const App = {
+  version: '2.0.0',
   elements: {},
   logsByPath: new Map(),
   isLoadingLogs: false,
@@ -19,20 +19,20 @@ const App = {
   },
 
   isPaused: false,
-  isAwaitingLog: false,
+  isAwaitingLog: false, // No longer used, always false (no queue system)
   isSavingLog: false,
   elapsedMs: 0,
-  pendingMs: 0,
   pomodoroMode: false,
   pomodoroInBreak: false,
   pomodoroSessionCount: 0,
   editingLogPath: null,
   currentEditingProjectId: null,
-  manualLogMode: false, // Track if we're in manual log mode (not timer-triggered)
-  pendingLogQueue: [],
-  activePendingLog: null,
+  manualLogMode: true, // Always in manual mode (no timer triggers)
   logTimespanBaseline: null,
   logTimespanEdited: false,
+
+  activeProjectSession: null, // { projectId, startTime, lastLogTime }
+  projectSessions: new Map(), // Map<projectId, { startTime, totalMs }> 
   lastTick: null,
   timerInterval: null,
   pollInterval: null,
@@ -94,7 +94,6 @@ const App = {
     this.setupAudioUnlock();
     this.originalTitle = document.title;
 
-    // Local mode - skip GitHub authentication
     this.showMainScreenLocal();
   },
 
@@ -110,12 +109,10 @@ const App = {
     const projects = Enhanced.getProjects();
     const select = this.elements.logProject;
 
-    // Clear existing options except the first "No project" option
     while (select.options.length > 1) {
       select.remove(1);
     }
 
-    // Add project options
     projects.filter(p => p.active).forEach(project => {
       const option = document.createElement('option');
       option.value = project.id;
@@ -123,12 +120,11 @@ const App = {
       select.appendChild(option);
     });
 
-    // Also populate filter dropdown
     this.populateFilterDropdowns();
   },
 
   populateFilterDropdowns() {
-    // Populate category filter
+
     if (this.elements.filterCategory) {
       const catSelect = this.elements.filterCategory;
       while (catSelect.options.length > 1) {
@@ -142,7 +138,6 @@ const App = {
       });
     }
 
-    // Populate project filter
     if (this.elements.filterProject) {
       const projSelect = this.elements.filterProject;
       while (projSelect.options.length > 1) {
@@ -188,13 +183,11 @@ const App = {
       if (!textMatch && !dateMatch && !timeMatch) return false;
     }
 
-    // Category filter
     if (this.filters.category) {
       const meta = this.getLogMetadata(log);
       if (meta?.category !== this.filters.category) return false;
     }
 
-    // Project filter
     if (this.filters.project) {
       const meta = this.getLogMetadata(log);
       if (meta?.project !== this.filters.project) return false;
@@ -331,7 +324,6 @@ const App = {
     this.elements.tabLogs.addEventListener('click', () => this.showLogsTab());
     this.elements.tabTimeline.addEventListener('click', () => this.showTimelineTab());
 
-    // Search and filter events
     if (this.elements.searchInput) {
       this.elements.searchInput.addEventListener('input', () => this.handleSearchInput());
     }
@@ -383,10 +375,8 @@ const App = {
     });
 
     document.addEventListener('keydown', (event) => {
-      // Skip if typing in input/textarea
       if (this.isTyping(event)) return;
 
-      // Check for modals
       const openModal = document.querySelector('.modal:not(.hidden)');
       const canUseShortcuts = !openModal || openModal === this.elements.helpModal;
 
@@ -469,7 +459,6 @@ const App = {
 
     window.addEventListener('beforeunload', () => {
       this.saveTimerState();
-      // Critical: Save all logs to IndexedDB before page closes
       this.syncCacheFromMemory();
     });
     window.addEventListener('resize', () => {
@@ -545,47 +534,24 @@ const App = {
             this.elapsedMs = data.elapsed;
           }
           this.isPaused = data.paused === true;
-          if (Array.isArray(data.queue)) {
-            this.pendingLogQueue = data.queue
-              .map(entry => this.normalizePendingQueueEntry(entry))
-              .filter(Boolean);
-          } else if (typeof data.pending === 'number' && data.pending > 0 && data.awaiting === true) {
-            const now = Date.now();
-            this.pendingLogQueue = [{
-              durationMs: Math.floor(data.pending),
-              appearedAtMs: now,
-              endAtMs: now
-            }];
-          }
-          this.syncPendingQueueState();
+          // NO MORE QUEUE - ignore old queue data
           this.lastSavedTimer = null;
           return;
         }
       } catch (err) {
-        this.toast(`Import failed: ${err.message}`, 'error');
-        this.toast(`Import failed: ${err.message}`, 'error');
+        console.error('Failed to load timer state:', err);
       }
     }
 
+    // Fallback to old storage format
     const elapsed = Number(localStorage.getItem(this.storage.elapsed));
-    const pending = Number(localStorage.getItem(this.storage.pending));
     const paused = localStorage.getItem(this.storage.paused);
-    const awaiting = localStorage.getItem(this.storage.awaiting);
 
     if (!Number.isNaN(elapsed) && elapsed >= 0) {
       this.elapsedMs = elapsed;
     }
 
     this.isPaused = paused === 'true';
-    if (!Number.isNaN(pending) && pending > 0 && awaiting === 'true') {
-      const now = Date.now();
-      this.pendingLogQueue = [{
-        durationMs: Math.floor(pending),
-        appearedAtMs: now,
-        endAtMs: now
-      }];
-    }
-    this.syncPendingQueueState();
   },
 
   normalizePendingQueueEntry(entry) {
@@ -631,12 +597,8 @@ const App = {
   saveTimerState() {
     const data = {
       elapsed: Math.floor(this.elapsedMs),
-      paused: this.isPaused,
-      queue: this.pendingLogQueue.map(entry => ({
-        durationMs: Math.floor(entry.durationMs),
-        appearedAtMs: Math.floor(entry.appearedAtMs),
-        endAtMs: Math.floor(entry.endAtMs)
-      }))
+      paused: this.isPaused
+      // NO MORE QUEUE - removed queue property
     };
     const packed = JSON.stringify(data);
     if (this.lastSavedTimer === packed) return;
@@ -652,27 +614,48 @@ const App = {
   },
 
   async ensureCacheReady() {
-    if (!this.cacheEnabled) return false;
+    console.log('🔧 ensureCacheReady - cacheEnabled:', this.cacheEnabled);
+
+    if (!this.cacheEnabled) {
+      console.error('🔧 ensureCacheReady - Cache is DISABLED!');
+      return false;
+    }
+
     if (!this.cacheInitPromise) {
-      if (typeof window === 'undefined' || !window.LogCache || !LogCache.isSupported()) {
+      console.log('🔧 ensureCacheReady - Initializing cache...');
+
+      if (typeof window === 'undefined') {
+        console.error('🔧 ensureCacheReady - window is undefined!');
         this.cacheEnabled = false;
         return false;
       }
 
+      if (!window.LogCache) {
+        console.error('🔧 ensureCacheReady - window.LogCache is undefined! Is cache.js loaded?');
+        this.cacheEnabled = false;
+        return false;
+      }
+
+      if (!LogCache.isSupported()) {
+        console.error('🔧 ensureCacheReady - IndexedDB not supported in this browser!');
+        this.cacheEnabled = false;
+        return false;
+      }
+
+      console.log('🔧 ensureCacheReady - Opening IndexedDB...');
       this.cacheInitPromise = LogCache.open().catch(err => {
-        console.warn('IndexedDB cache unavailable', err);
+        console.error('🔧 ensureCacheReady - LogCache.open() FAILED:', err);
         this.cacheEnabled = false;
         return null;
       });
     }
 
     const db = await this.cacheInitPromise;
+    console.log('🔧 ensureCacheReady - DB ready?', !!db);
     return !!db;
   },
 
-  // Phase 1: Helper to get metadata (supports both old and new systems during migration)
   getLogMetadata(log) {
-    // Try to get metadata from embedded log object first (new way)
     if (log.project !== undefined || log.category !== undefined || log.energy !== undefined) {
       return {
         project: log.project || null,
@@ -682,18 +665,16 @@ const App = {
       };
     }
 
-    // Fallback to old separate storage (for backwards compatibility during migration)
     return Enhanced.getLogMetadata(log.path) || {};
   },
 
   serializeLogForCache(log) {
-    // Phase 1: Embed metadata directly in the log object
     return {
       path: log.path,
       text: String(log.text || ''),
       date: log.date || '',
       time: log.time || '',
-      username: log.username || 'local-user',
+      username: log.username || (this.user ? this.user.login : this.generateUsername()),
       durationMs: log.durationMs || 0,
       project: log.project || null,
       category: log.category || null,
@@ -708,8 +689,6 @@ const App = {
     if (!parsed) return null;
 
     const log = this.buildLogEntry(entry.path, parsed, entry.text || '');
-
-    // Phase 1: Extract embedded metadata
     log.project = entry.project || null;
     log.category = entry.category || null;
     log.energy = entry.energy || null;
@@ -719,11 +698,18 @@ const App = {
   },
 
   async loadLogsFromCache() {
-    if (!(await this.ensureCacheReady())) return false;
+    console.log('📂 loadLogsFromCache - Starting...');
+    if (!(await this.ensureCacheReady())) {
+      console.error('📂 loadLogsFromCache - Cache not ready!');
+      return false;
+    }
 
     try {
       const cached = await LogCache.getAllLogs();
+      console.log('📂 loadLogsFromCache - Retrieved from IndexedDB:', cached?.length || 0, 'logs');
+
       if (!Array.isArray(cached) || cached.length === 0) {
+        console.warn('📂 loadLogsFromCache - No logs found in cache');
         return false;
       }
 
@@ -739,6 +725,8 @@ const App = {
         loaded += 1;
       }
 
+      console.log('📂 loadLogsFromCache - Loaded', loaded, 'logs into memory');
+
       if (loaded === 0) {
         return false;
       }
@@ -747,27 +735,37 @@ const App = {
       this.renderLogs();
       return true;
     } catch (err) {
-      this.toast(`Import failed: ${err.message}`, 'error');
+      console.error('📂 loadLogsFromCache - ERROR:', err);
       this.toast(`Import failed: ${err.message}`, 'error');
       return false;
     }
   },
 
   async saveLogsToCache(logs, { replace = false } = {}) {
-    if (!(await this.ensureCacheReady())) return;
+    console.log('💾 saveLogsToCache - Starting...', logs?.length || 0, 'logs, replace:', replace);
+    if (!(await this.ensureCacheReady())) {
+      console.error('💾 saveLogsToCache - Cache not ready!');
+      return;
+    }
+
     const items = (logs || [])
       .map(log => this.serializeLogForCache(log))
       .filter(item => item && item.path);
 
+    console.log('💾 saveLogsToCache - Serialized', items.length, 'items');
+
     try {
       if (replace) {
+        console.log('💾 saveLogsToCache - Replacing all logs in IndexedDB');
         await LogCache.replaceAllLogs(items);
       } else if (items.length > 0) {
+        console.log('💾 saveLogsToCache - Putting', items.length, 'logs to IndexedDB');
         await LogCache.putLogs(items);
       }
+      console.log('💾 saveLogsToCache - SUCCESS! Logs saved to IndexedDB');
     } catch (err) {
-      this.toast(`Import failed: ${err.message}`, 'error');
-      this.toast(`Import failed: ${err.message}`, 'error');
+      console.error('💾 saveLogsToCache - ERROR:', err);
+      this.toast(`Failed to save: ${err.message}`, 'error');
     }
   },
 
@@ -798,17 +796,13 @@ const App = {
   },
 
   mergePendingLogs() {
-    // Phase 1: Migration function to move old pendingLogs to new system
-    // This will be removed after users migrate
     const pending = this.loadPendingLogs();
     let migrated = 0;
 
     for (const [path, entry] of Object.entries(pending)) {
       if (this.logsByPath.has(path)) {
-        continue; // Already exists
+        continue; 
       }
-
-      // Validate entry has required data
       if (!entry || !entry.text) {
         continue;
       }
@@ -818,10 +812,8 @@ const App = {
         continue;
       }
 
-      // Build log with embedded metadata
       const log = this.buildLogEntry(path, parsed, entry.text);
 
-      // Try to get metadata from old system and embed it
       const oldMetadata = Enhanced.getLogMetadata(path);
       if (oldMetadata) {
         log.project = oldMetadata.project || null;
@@ -834,7 +826,6 @@ const App = {
       migrated++;
     }
 
-    // Clear old pending logs after migration
     if (migrated > 0) {
       localStorage.removeItem(this.storage.pendingLogs);
       this.syncCacheFromMemory(); // Save migrated logs to IndexedDB
@@ -848,14 +839,6 @@ const App = {
     this.elements.intervalInput.value = minutes;
     localStorage.setItem(this.storage.interval, String(minutes));
 
-    if (!this.isPaused) {
-      const queued = this.queueElapsedIntervals(Date.now());
-      if (queued > 0) {
-        this.showPendingLogModal();
-        this.playBeep();
-        this.triggerAttention();
-      }
-    }
     this.updateCounter();
     this.updateTodayHours();
     this.updateTimelineTotal();
@@ -873,11 +856,60 @@ const App = {
     this.elements.mainScreen.classList.add('hidden');
   },
 
+  generateUsername() {
+    // Check if username already exists in localStorage
+    const stored = localStorage.getItem('worklog_username');
+    if (stored) return stored;
+
+    // Generate random username
+    const adjectives = ['Swift', 'Bright', 'Clever', 'Bold', 'Quick', 'Wise', 'Keen', 'Sharp', 'Astute', 'Nimble', 'Agile', 'Savvy', 'Deft', 'Adept', 'Skilled'];
+    const nouns = ['Coder', 'Dev', 'Builder', 'Maker', 'Hacker', 'Engineer', 'Architect', 'Creator', 'Crafter', 'Designer', 'Artisan', 'Expert', 'Pro', 'Wizard', 'Ninja'];
+
+    const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+    const noun = nouns[Math.floor(Math.random() * nouns.length)];
+    const num = Math.floor(Math.random() * 100);
+
+    const username = `${adj}${noun}${num}`;
+
+    // Store for future use
+    localStorage.setItem('worklog_username', username);
+    return username;
+  },
+
+  generateAvatar(username) {
+    // Generate consistent color from username
+    let hash = 0;
+    for (let i = 0; i < username.length; i++) {
+      hash = username.charCodeAt(i) + ((hash << 5) - hash);
+    }
+
+    // Generate pleasant colors (avoid too dark or too bright)
+    const hue = hash % 360;
+    const saturation = 65 + (hash % 20); // 65-85%
+    const lightness = 45 + (hash % 15);  // 45-60%
+    const bgColor = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+
+    // Get initials (first 2 chars, uppercase)
+    const initials = username.substring(0, 2).toUpperCase();
+
+    // Generate SVG avatar
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+      <rect width="100" height="100" fill="${bgColor}"/>
+      <text x="50" y="62" font-size="48" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-weight="600">${initials}</text>
+    </svg>`;
+
+    // Encode to data URI
+    return 'data:image/svg+xml,' + encodeURIComponent(svg);
+  },
+
   async showMainScreenLocal() {
-    // Local mode - use mock user data
+    // Generate or retrieve persistent username
+    const username = this.generateUsername();
+    const avatar = this.generateAvatar(username);
+
     this.user = {
-      login: 'local-user',
-      avatar_url: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"%3E%3Crect width="100" height="100" fill="%230f7a4a"/%3E%3Ctext x="50" y="62" font-size="48" text-anchor="middle" fill="%23ffffff" font-family="Arial"%3EYou%3C/text%3E%3C/svg%3E'
+      login: username,
+      avatar_url: avatar
     };
     this.elements.userAvatar.src = this.user.avatar_url;
     this.elements.userName.textContent = `@${this.user.login}`;
@@ -892,17 +924,20 @@ const App = {
     this.initTimeline();
     this.elements.logLoading.classList.add('hidden');
 
-    // Phase 3: Check and archive old logs
     setTimeout(() => this.checkAndArchiveOldLogs(), 2000);
 
-    // Skip polling - local mode only, no GitHub sync
+    setTimeout(() => this.showManualLogEntry(), 500);
+
   },
 
   async showMainScreen() {
-    // Local mode - set default user
+    // Generate or retrieve persistent username
+    const username = this.generateUsername();
+    const avatar = this.generateAvatar(username);
+
     this.user = {
-      login: 'local-user',
-      avatar_url: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"%3E%3Ccircle cx="50" cy="50" r="50" fill="%230f7a4a"/%3E%3Ctext x="50" y="65" font-size="50" text-anchor="middle" fill="white" font-family="Arial"%3EU%3C/text%3E%3C/svg%3E'
+      login: username,
+      avatar_url: avatar
     };
     this.elements.userAvatar.src = this.user.avatar_url;
     this.elements.userName.textContent = `@${this.user.login}`;
@@ -944,12 +979,10 @@ const App = {
   },
 
   openProfile() {
-    // Local mode - show stats instead of GitHub profile
     this.showStats();
   },
 
   async login() {
-    // Local mode - no authentication needed
     this.toast('Signed in!', 'success');
     await this.showMainScreenLocal();
   },
@@ -961,7 +994,6 @@ const App = {
     this.renderedPaths = [];
     this.renderedPathSet = new Set();
     this.logsVersion = 0;
-    // Local mode - just reload the page
     window.location.reload();
   },
 
@@ -970,24 +1002,9 @@ const App = {
     this.lastTick = Date.now();
     this.setPauseButton(this.isPaused);
 
-    // Auto-save logs every 5 minutes to prevent data loss
     this.autoSaveInterval = setInterval(() => {
       this.syncCacheFromMemory();
     }, 5 * 60 * 1000);
-
-    if (!this.isPaused) {
-      const queued = this.queueElapsedIntervals(this.lastTick);
-      if (queued > 0) {
-        this.playBeep();
-        this.triggerAttention();
-      }
-    }
-
-    this.showPendingLogModal();
-    if (this.isAwaitingLog) {
-      this.updateFavicon(true);
-      this.setTitleAlert(true);
-    }
 
     this.updateCounter();
     this.saveTimerState();
@@ -1010,12 +1027,6 @@ const App = {
 
     if (!this.isPaused) {
       this.elapsedMs += delta;
-      const queued = this.queueElapsedIntervals(now);
-      if (queued > 0) {
-        this.showPendingLogModal();
-        this.playBeep();
-        this.triggerAttention();
-      }
     }
 
     this.updateCounter();
@@ -1181,6 +1192,7 @@ const App = {
 
   showPendingLogModal(force = false) {
     const current = this.pendingLogQueue[0] || null;
+
     if (!current) {
       this.activePendingLog = null;
       this.logTimespanBaseline = null;
@@ -1197,8 +1209,9 @@ const App = {
 
     this.activePendingLog = current;
     this.showModal(this.elements.logModal);
-    this.populateLogTimespan(current.durationMs, current.endAtMs);
-    this.applyDefaultValues(); // Apply default values
+
+    this.populateLogTimespan(current.durationMs, Date.now());
+    this.applyDefaultValues();
     this.validateLogTimespan();
     setTimeout(() => this.elements.logText.focus(), 100);
   },
@@ -1206,17 +1219,14 @@ const App = {
   applyDefaultValues() {
     const prefs = Enhanced.getPreferences();
 
-    // Apply default project
     if (prefs.defaultProject && this.elements.logProject) {
       this.elements.logProject.value = prefs.defaultProject;
     }
 
-    // Apply default category
     if (prefs.defaultCategory && this.elements.logCategory) {
       this.elements.logCategory.value = prefs.defaultCategory;
     }
 
-    // Apply default energy
     if (prefs.defaultEnergy && this.elements.logEnergy) {
       this.elements.logEnergy.value = prefs.defaultEnergy;
     }
@@ -1226,6 +1236,7 @@ const App = {
     if (this.pendingLogQueue.length > 0) {
       this.pendingLogQueue.shift();
     }
+
     this.activePendingLog = null;
     this.logTimespanBaseline = null;
     this.logTimespanEdited = false;
@@ -1293,25 +1304,21 @@ const App = {
   },
 
   showManualLogEntry() {
-    // This allows adding logs independent of the timer
+
     this.manualLogMode = true;
     this.editingLogPath = null;
 
-    // ALWAYS set to current date/time for new manual entries
     const now = new Date();
     const parts = Time.getZonedParts(now);
 
-    // Set current date as default
     if (this.elements.logDate) {
       this.elements.logDate.value = Time.formatDateValue(parts);
     }
 
-    // Set current time as end time (default)
     if (this.elements.logTime) {
       this.elements.logTime.value = Time.formatTimeValue(parts);
     }
 
-    // Default to 1 hour duration
     if (this.elements.logHours) {
       this.elements.logHours.value = '1';
     }
@@ -1319,27 +1326,21 @@ const App = {
       this.elements.logMinutes.value = '0';
     }
 
-    // Clear description
     if (this.elements.logText) {
       this.elements.logText.value = '';
     }
 
-    // Apply default project, category, energy
     this.applyDefaultValues();
 
-    // Update button text
     if (this.elements.registerLog) {
       this.elements.registerLog.textContent = 'Add Log';
     }
 
-    // Clear any errors
     this.clearLogError();
 
-    // Reset baseline so validation works correctly
     this.logTimespanBaseline = null;
     this.logTimespanEdited = false;
 
-    // Show modal
     this.showModal(this.elements.logModal);
     this.validateLogTimespan();
     setTimeout(() => this.elements.logText.focus(), 100);
@@ -1381,7 +1382,6 @@ const App = {
       const category = this.elements.logCategory?.value || 'other';
       const energy = this.elements.logEnergy?.value || 'medium';
 
-      // Save enhanced metadata
       if (projectId || category || energy) {
         Enhanced.saveLogMetadata(path, {
           project: projectId,
@@ -1391,16 +1391,14 @@ const App = {
         });
       }
 
-      // Local mode - skip GitHub upload, save directly to local storage
       this.addPendingLog(path, text);
-      this.toast('Log saved locally', 'success');
-      this.addLogLocal(path, text);
 
-      // Clear the draft
+      await this.addLogLocal(path, text);
+      this.toast('Log saved locally', 'success');
+
       this.elements.logText.value = '';
       localStorage.removeItem('worklog_draft');
 
-      // Track Pomodoro session if in Pomodoro mode
       if (this.pomodoroMode) {
         this.completePomodoroSession();
       }
@@ -1609,9 +1607,7 @@ const App = {
     return null;
   },
 
-  adjustOverlappingLogs(newLogStartDate, newLogEndDate) {
-    // When creating a new log, automatically adjust any overlapping logs
-    // by truncating their end time to the start time of the new log
+  async adjustOverlappingLogs(newLogStartDate, newLogEndDate) {
     if (!this.user || !this.user.login) return;
     const username = this.user.login;
 
@@ -1627,11 +1623,7 @@ const App = {
       const logDuration = log.durationMs || this.intervalMs;
       const logStart = new Date(logEnd.getTime() - logDuration);
 
-      // Check if this log overlaps with the new log
-      // Overlap occurs if: logStart < newLogEnd AND logEnd > newLogStart
       if (logStart < newLogEndDate && logEnd > newLogStartDate) {
-        // Adjust the overlapping log's end time to the new log's start time
-        // New duration = newLogStartDate - logStart
         const adjustedDuration = newLogStartDate.getTime() - logStart.getTime();
 
         logsToAdjust.push({
@@ -1643,19 +1635,15 @@ const App = {
       }
     }
 
-    // Process adjustments
     for (const adjustment of logsToAdjust) {
       const { oldPath, log, adjustedDuration, newEndDate } = adjustment;
 
       if (adjustedDuration > 0) {
-        // Delete old log entry
         this.logsByPath.delete(oldPath);
 
-        // Create new path with adjusted end time and duration
         const newFilename = this.buildFilename(newEndDate, username, adjustedDuration);
         const newPath = `logs/${newFilename}`;
 
-        // Phase 1: Create adjusted log with embedded metadata preserved
         const adjustedLog = {
           ...log,
           path: newPath,
@@ -1663,26 +1651,22 @@ const App = {
           time: Time.formatTimeValue(Time.getZonedParts(newEndDate)),
           dateObj: newEndDate,
           durationMs: adjustedDuration,
-          // Metadata is already embedded in log object
           project: log.project || null,
           category: log.category || null,
           energy: log.energy || null,
           createdAt: log.createdAt || new Date().toISOString()
         };
 
-        // Add adjusted log
         this.logsByPath.set(newPath, adjustedLog);
       } else {
-        // If the adjusted duration would be 0 or negative, delete the overlapping log
         this.logsByPath.delete(oldPath);
       }
     }
 
-    // Update cache after all adjustments
     if (logsToAdjust.length > 0) {
-      this.syncCacheFromMemory();
       this.logsVersion += 1;
       this.renderLogs();
+      await this.syncCacheFromMemory();
     }
   },
 
@@ -1707,10 +1691,9 @@ const App = {
       }
       return null;
     }
-
-    // Auto-adjust overlapping logs instead of showing error
-    // This will be handled in submitLog, so no need to validate overlaps here
+    
     this.clearLogError();
+
     if (!this.isSavingLog) {
       this.elements.registerLog.disabled = false;
     }
@@ -1728,8 +1711,6 @@ const App = {
     const second = pad(parts.second);
     const ms = String(parts.ms).padStart(3, '0');
     const duration = this.formatDuration(durationMs || 0);
-
-    // Include milliseconds to allow multiple logs at the same second (e.g., different projects)
     return `${year}-${month}-${day}.${hour}h${minute}m${second}s${ms}ms.${duration}.${username}.txt`;
   },
 
@@ -1744,7 +1725,6 @@ const App = {
     const durationRaw = parts.length >= 5 ? parts[2] : null;
     const username = parts.length >= 5 ? parts[3] : parts[2];
 
-    // Support both old format (HHhMMmSSs) and new format (HHhMMmSSsMSms)
     const match = timeRaw.match(/(\d{2})h(\d{2})m(\d{2})s(?:(\d{3})ms)?/);
     const time = match ? `${match[1]}:${match[2]}:${match[3]}` : timeRaw;
     const durationMatch = durationRaw ? durationRaw.match(/(\d{2,})m(\d{2})s/) : null;
@@ -1753,13 +1733,14 @@ const App = {
     return { date, time, duration, username };
   },
 
-  addLogLocal(path, text, metadata = {}) {
+  async addLogLocal(path, text, metadata = {}) {
     const parsed = this.parseLogPath(path);
-    if (!parsed) return;
+    if (!parsed) {
+      return;
+    }
 
     const log = this.buildLogEntry(path, parsed, text);
 
-    // Phase 1: Embed metadata directly in log object
     log.project = metadata.project || null;
     log.category = metadata.category || null;
     log.energy = metadata.energy || null;
@@ -1769,7 +1750,8 @@ const App = {
     this.logsVersion += 1;
 
     this.renderLogs();
-    this.saveLogsToCache([log]);
+
+    await this.saveLogsToCache([log]);
   },
 
   buildLogEntry(path, parsed, text) {
@@ -1784,7 +1766,6 @@ const App = {
   },
 
   async loadLogs(forceFull = false) {
-    // Local mode - no GitHub sync, just use cache
     return true;
   },
 
@@ -2108,15 +2089,12 @@ const App = {
       const row = document.createElement('div');
       row.className = 'timeline-row';
 
-      const userCell = document.createElement('a');
+      const userCell = document.createElement('div');
       userCell.className = 'timeline-user';
-      userCell.href = `https://github.com/${user.username}`;
-      userCell.target = '_blank';
-      userCell.rel = 'noopener';
       userCell.title = user.username;
 
       const avatar = document.createElement('img');
-      avatar.src = `https://github.com/${user.username}.png`;
+      avatar.src = this.generateAvatar(user.username);
       avatar.alt = user.username;
       userCell.appendChild(avatar);
 
@@ -2239,7 +2217,6 @@ const App = {
       return ((date - anchor) / (7 * 24 * 60 * 60 * 1000)) * periodWidth;
     }
 
-    // For both monthly and yearly scales, we use months as the period unit
     const monthsDiff = this.monthDiff(anchor, date);
     const baseMonth = this.addMonths(anchor, monthsDiff);
     const daysInMonth = this.daysInMonth(baseMonth);
@@ -2262,7 +2239,6 @@ const App = {
       return new Date(anchor.getTime() + ms);
     }
 
-    // For both monthly and yearly scales, we use months as the period unit
     const monthsDiff = Math.floor(x / periodWidth);
     const offset = x - monthsDiff * periodWidth;
     const baseMonth = this.addMonths(anchor, monthsDiff);
@@ -2368,7 +2344,6 @@ const App = {
   renderLogs() {
     const allPaths = Array.from(this.logsByPath.keys()).sort();
 
-    // Apply filters
     const paths = allPaths.filter(path => {
       const log = this.logsByPath.get(path);
       return log && this.matchesFilters(log);
@@ -2468,7 +2443,6 @@ const App = {
     userLink.className = 'log-user-link';
     meta.appendChild(userLink);
 
-    // Add category badge if present
     if (category && Enhanced.categories[category]) {
       const catInfo = Enhanced.categories[category];
       const badge = document.createElement('span');
@@ -2480,7 +2454,6 @@ const App = {
       meta.appendChild(badge);
     }
 
-    // Add project badge if present
     if (projectId) {
       const projects = Enhanced.getProjects();
       const project = projects.find(p => p.id === projectId);
@@ -2495,7 +2468,6 @@ const App = {
       }
     }
 
-    // Add energy indicator if present
     if (energy && Enhanced.energyLevels[energy]) {
       const energyInfo = Enhanced.energyLevels[energy];
       const energyBadge = document.createElement('span');
@@ -2510,7 +2482,6 @@ const App = {
     message.className = 'log-message';
     message.textContent = log.text;
 
-    // Add actions
     const actions = document.createElement('div');
     actions.className = 'log-actions';
 
@@ -2613,7 +2584,6 @@ const App = {
       osc.frequency.value = freq;
       osc.connect(gain);
 
-      // Soft attack/decay for a gentle chime
       gain.gain.setValueAtTime(0.0, start);
       gain.gain.linearRampToValueAtTime(0.06, start + 0.03);
       gain.gain.exponentialRampToValueAtTime(0.001, start + duration);
@@ -2632,7 +2602,6 @@ const App = {
     setTimeout(() => toast.remove(), 4000);
   },
 
-  // Statistics Modal
   showStats() {
     const logs = Array.from(this.logsByPath.values());
     const totalLogs = logs.length;
@@ -2643,7 +2612,6 @@ const App = {
       return;
     }
 
-    // Basic stats
     const totalMs = logs.reduce((sum, log) => sum + (log.durationMs || 0), 0);
     const totalHours = (totalMs / (1000 * 60 * 60)).toFixed(2);
 
@@ -2659,10 +2627,8 @@ const App = {
     const lastDate = dates[dates.length - 1];
     const avgPerDay = dates.length > 0 ? (totalMs / dates.length / (1000 * 60 * 60)).toFixed(2) : 0;
 
-    // Productivity score for today
     const productivityScore = Enhanced.calculateProductivityScore(logs, new Date());
 
-    // Category breakdown
     const categoryTotals = {};
     logs.forEach(log => {
       const meta = this.getLogMetadata(log);
@@ -2683,7 +2649,6 @@ const App = {
       })
       .join('');
 
-    // Project breakdown
     const projectTotals = {};
     logs.forEach(log => {
       const meta = this.getLogMetadata(log);
@@ -2710,7 +2675,6 @@ const App = {
       .filter(Boolean)
       .join('');
 
-    // Energy patterns
     const energyTotals = { high: 0, medium: 0, low: 0 };
     logs.forEach(log => {
       const meta = this.getLogMetadata(log);
@@ -2733,7 +2697,6 @@ const App = {
       .filter(Boolean)
       .join('');
 
-    // Top days
     const topDays = Object.entries(byDate)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
@@ -2743,7 +2706,6 @@ const App = {
       })
       .join('');
 
-    // Insights
     const insights = Enhanced.getProductivityInsights(logs, 7);
     const pomodoroInsights = Enhanced.getPomodoroInsights(7);
     const allInsights = [...insights, ...pomodoroInsights];
@@ -2751,7 +2713,6 @@ const App = {
       `<li>${insight.text}</li>`
     ).join('');
 
-    // Goals
     const goals = Enhanced.getGoals();
     const todayMs = this.computePeriodTotalMs('daily');
     const todayHours = todayMs / (1000 * 60 * 60);
@@ -2826,14 +2787,11 @@ const App = {
     this.showModal(this.elements.statsModal);
   },
 
-  // Export Modal
   showExport() {
     this.showModal(this.elements.exportModal);
   },
 
-  // Export to JSON
   exportJSON() {
-    // Phase 1: Export logs with embedded metadata
     const logs = Array.from(this.logsByPath.values()).map(log => ({
       path: log.path,
       username: log.username,
@@ -2841,7 +2799,6 @@ const App = {
       time: log.time,
       durationMs: log.durationMs,
       text: log.text,
-      // Metadata is now embedded in log object
       project: log.project || null,
       category: log.category || null,
       energy: log.energy || null,
@@ -2849,7 +2806,7 @@ const App = {
     }));
 
     const data = {
-      version: 3, // Bumped for Phase 1-3 changes
+      version: 3,
       exportDate: new Date().toISOString(),
       timezone: Time.getTimeZone(),
       totalLogs: logs.length,
@@ -2872,7 +2829,6 @@ const App = {
     this.toast(`Exported ${logs.length} logs + projects + settings`, 'success');
   },
 
-  // Export to CSV
   exportCSV() {
     const logs = Array.from(this.logsByPath.values());
 
@@ -2885,7 +2841,6 @@ const App = {
       const time = log.time;
       const hours = (log.durationMs / (1000 * 60 * 60)).toFixed(2);
 
-      // Phase 1: Read metadata from log object
       let projectName = '';
       if (log.project) {
         const project = Enhanced.getProjects().find(p => p.id === log.project);
@@ -2913,7 +2868,6 @@ const App = {
     this.toast(`Exported ${logs.length} logs to CSV`, 'success');
   },
 
-  // Import from JSON
   async importJSON() {
     const file = this.elements.importFile.files[0];
     if (!file) {
@@ -2930,7 +2884,6 @@ const App = {
         return;
       }
 
-      // Import projects if available
       if (data.projects && Array.isArray(data.projects)) {
         const existingProjects = Enhanced.getProjects();
         const existingIds = new Set(existingProjects.map(p => p.id));
@@ -2941,13 +2894,11 @@ const App = {
         }
       }
 
-      // Import preferences if available
       if (data.preferences && typeof data.preferences === 'object') {
         const currentPrefs = Enhanced.getPreferences();
         Enhanced.savePreferences({ ...currentPrefs, ...data.preferences });
       }
 
-      // Import goals if available
       if (data.goals && typeof data.goals === 'object') {
         Enhanced.saveGoals(data.goals);
       }
@@ -2955,14 +2906,12 @@ const App = {
       let imported = 0;
       for (const logData of data.logs) {
         if (this.logsByPath.has(logData.path)) {
-          continue; // Skip duplicates
+          continue;
         }
 
-        // Parse the log path to get structured data
         const parsed = this.parseLogPath(logData.path);
         if (!parsed) continue;
 
-        // Phase 1: Build log entry with embedded metadata
         const log = this.buildLogEntry(logData.path, parsed, logData.text || '');
         log.project = logData.project || null;
         log.category = logData.category || null;
@@ -2977,7 +2926,6 @@ const App = {
       this.renderLogs();
       await this.syncCacheFromMemory();
 
-      // Reload projects in UI
       this.loadProjects();
 
       this.toast(`Imported ${imported} logs (${data.logs.length - imported} duplicates skipped)`, 'success');
@@ -2988,7 +2936,6 @@ const App = {
     }
   },
 
-  // Clear all data
   clearAllData() {
     if (!confirm('⚠️ This will delete ALL your logs and reset the app. This cannot be undone!\n\nAre you sure?')) {
       return;
@@ -2998,10 +2945,8 @@ const App = {
       return;
     }
 
-    // Clear all storage
     localStorage.clear();
 
-    // Clear IndexedDB
     if (this.cacheEnabled) {
       indexedDB.deleteDatabase('WorklogCache');
     }
@@ -3010,16 +2955,13 @@ const App = {
     setTimeout(() => window.location.reload(), 1000);
   },
 
-  // Pomodoro methods
   showPomodoroSettings() {
-    // Redirect to Settings modal with Pomodoro tab active
     this.showSettings('pomodoro');
   },
 
   updatePomodoroStats() {
     const stats = Enhanced.getPomodoroStats();
 
-    // Populate stats in Settings modal
     if (this.elements.pomodoroTodayCount) {
       this.elements.pomodoroTodayCount.textContent = `${stats.completedToday || 0} sessions`;
     }
@@ -3091,11 +3033,9 @@ const App = {
     const prefs = Enhanced.getPreferences();
     const sessionsUntilLong = 4;
 
-    // Determine break type
     const isLongBreak = this.pomodoroSessionCount % sessionsUntilLong === 0;
     const breakDuration = isLongBreak ? prefs.pomodoroLongBreak : prefs.pomodoroBreak;
 
-    // Show break notification
     this.toast(
       isLongBreak
         ? `🎉 Great work! Take a ${breakDuration}-minute long break.`
@@ -3103,23 +3043,19 @@ const App = {
       'success'
     );
 
-    // Start break timer (optional - could auto-start next session)
     this.pomodoroInBreak = true;
     Enhanced.recordPomodoroBreak();
   },
 
-  // Settings methods
   showSettings(tabName = 'defaults') {
     const prefs = Enhanced.getPreferences();
     const goals = Enhanced.getGoals();
     const projects = Enhanced.getProjects();
 
-    // Populate defaults tab
     document.getElementById('settings-default-interval').value = prefs.defaultInterval || 60;
     document.getElementById('settings-default-energy').value = prefs.defaultEnergy || '';
     document.getElementById('settings-default-category').value = prefs.defaultCategory || '';
 
-    // Populate default project dropdown
     const defaultProjectSelect = document.getElementById('settings-default-project');
     while (defaultProjectSelect.options.length > 1) {
       defaultProjectSelect.remove(1);
@@ -3132,7 +3068,6 @@ const App = {
     });
     defaultProjectSelect.value = prefs.defaultProject || '';
 
-    // Populate goals tab
     document.getElementById('settings-daily-enabled').checked = goals.daily?.enabled !== false;
     document.getElementById('settings-daily-hours').value = goals.daily?.hours || 8;
     document.getElementById('settings-weekly-enabled').checked = goals.weekly?.enabled !== false;
@@ -3140,17 +3075,14 @@ const App = {
     document.getElementById('settings-monthly-enabled').checked = goals.monthly?.enabled || false;
     document.getElementById('settings-monthly-hours').value = goals.monthly?.hours || 160;
 
-    // Populate pomodoro tab
     document.getElementById('settings-pomodoro-enabled').checked = prefs.pomodoroEnabled || false;
     document.getElementById('settings-pomodoro-work').value = prefs.pomodoroDuration || 25;
     document.getElementById('settings-pomodoro-short-break').value = prefs.pomodoroBreak || 5;
     document.getElementById('settings-pomodoro-long-break').value = prefs.pomodoroLongBreak || 15;
     document.getElementById('settings-pomodoro-sessions').value = prefs.pomodoroSessions || 4;
 
-    // Update Pomodoro stats
     this.updatePomodoroStats();
 
-    // Populate preferences tab
     document.getElementById('settings-sound-enabled').checked = prefs.soundEnabled !== false;
     document.getElementById('settings-notifications-enabled').checked = prefs.notificationsEnabled !== false;
     document.getElementById('settings-autosave-enabled').checked = prefs.autosaveEnabled !== false;
@@ -3158,19 +3090,15 @@ const App = {
     document.getElementById('settings-track-energy').checked = prefs.trackEnergy !== false;
     document.getElementById('settings-track-category').checked = prefs.trackCategory !== false;
 
-    // Switch to requested tab
     this.switchSettingsTab(tabName);
 
     this.showModal(this.elements.settingsModal);
   },
 
   switchSettingsTab(tabName) {
-    // Switch tab buttons
     document.querySelectorAll('.settings-tab').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.tab === tabName);
     });
-
-    // Switch panels
     document.querySelectorAll('.settings-panel').forEach(panel => {
       panel.classList.remove('active');
     });
@@ -3185,13 +3113,11 @@ const App = {
     const prefs = Enhanced.getPreferences();
     const goals = Enhanced.getGoals();
 
-    // Save defaults
     prefs.defaultInterval = parseInt(document.getElementById('settings-default-interval').value) || 60;
     prefs.defaultEnergy = document.getElementById('settings-default-energy').value;
     prefs.defaultCategory = document.getElementById('settings-default-category').value;
     prefs.defaultProject = document.getElementById('settings-default-project').value;
 
-    // Save goals
     goals.daily = {
       enabled: document.getElementById('settings-daily-enabled').checked,
       hours: parseFloat(document.getElementById('settings-daily-hours').value) || 8
@@ -3205,7 +3131,6 @@ const App = {
       hours: parseFloat(document.getElementById('settings-monthly-hours').value) || 160
     };
 
-    // Save pomodoro settings
     const pomodoroWasEnabled = prefs.pomodoroEnabled;
     prefs.pomodoroEnabled = document.getElementById('settings-pomodoro-enabled').checked;
     prefs.pomodoroDuration = parseInt(document.getElementById('settings-pomodoro-work').value) || 25;
@@ -3213,7 +3138,6 @@ const App = {
     prefs.pomodoroLongBreak = parseInt(document.getElementById('settings-pomodoro-long-break').value) || 15;
     prefs.pomodoroSessions = parseInt(document.getElementById('settings-pomodoro-sessions').value) || 4;
 
-    // Save preferences
     prefs.soundEnabled = document.getElementById('settings-sound-enabled').checked;
     prefs.notificationsEnabled = document.getElementById('settings-notifications-enabled').checked;
     prefs.autosaveEnabled = document.getElementById('settings-autosave-enabled').checked;
@@ -3221,15 +3145,12 @@ const App = {
     prefs.trackEnergy = document.getElementById('settings-track-energy').checked;
     prefs.trackCategory = document.getElementById('settings-track-category').checked;
 
-    // Save to storage
     Enhanced.savePreferences(prefs);
     Enhanced.saveGoals(goals);
 
-    // Apply settings
     this.intervalMs = prefs.defaultInterval * 60 * 1000;
     this.elements.intervalInput.value = prefs.defaultInterval;
 
-    // Apply interval visibility
     const intervalControl = this.elements.intervalInput?.closest('.interval-control');
     if (intervalControl) {
       if (prefs.showInterval) {
@@ -3239,7 +3160,6 @@ const App = {
       }
     }
 
-    // Apply Pomodoro mode
     if (prefs.pomodoroEnabled && !pomodoroWasEnabled) {
       this.enablePomodoroMode(prefs.pomodoroDuration);
     } else if (!prefs.pomodoroEnabled && pomodoroWasEnabled) {
@@ -3473,6 +3393,8 @@ const App = {
   },
 
   async submitLog() {
+    
+
     if (!this.isAwaitingLog && !this.editingLogPath && !this.manualLogMode) return;
 
     const text = this.elements.logText.value.trim();
@@ -3494,7 +3416,7 @@ const App = {
     try {
       // Auto-adjust any overlapping logs before saving the new one
       if (!this.editingLogPath) {
-        this.adjustOverlappingLogs(timespan.startDate, timespan.endDate);
+        await this.adjustOverlappingLogs(timespan.startDate, timespan.endDate);
       }
 
       const filename = this.buildFilename(timespan.endDate, this.user.login, timespan.durationMs);
@@ -3512,25 +3434,20 @@ const App = {
         createdAt: new Date().toISOString()
       };
 
-      // If editing, delete the old log first
       if (this.editingLogPath) {
         this.logsByPath.delete(this.editingLogPath);
       }
 
-      // Phase 1: Save log with embedded metadata to IndexedDB only
+      await this.addLogLocal(path, text, metadata);
       this.toast(this.editingLogPath ? 'Log updated!' : 'Log saved locally', 'success');
-      this.addLogLocal(path, text, metadata);
 
-      // Clear the draft
       this.elements.logText.value = '';
       localStorage.removeItem('worklog_draft');
 
-      // Track Pomodoro session if in Pomodoro mode (only for new logs, not edits or manual)
       if (this.pomodoroMode && !this.editingLogPath && !this.manualLogMode) {
         this.completePomodoroSession();
       }
 
-      // Reset editing state
       this.editingLogPath = null;
       const wasManualMode = this.manualLogMode;
       this.manualLogMode = false;
@@ -3539,11 +3456,9 @@ const App = {
         this.elements.registerLog.textContent = 'Send';
       }
 
-      // Only complete pending log if it was from the timer, not manual entry
       if (!wasManualMode) {
         this.completeCurrentPendingLog();
       } else {
-        // Manual log - just close the modal
         this.hideModal(this.elements.logModal);
       }
     } catch (err) {
@@ -3559,7 +3474,7 @@ const App = {
     }
   },
 
-  deleteLog(path) {
+  async deleteLog(path) {
     const log = this.logsByPath.get(path);
     if (!log) {
       this.toast('Log not found', 'error');
@@ -3572,32 +3487,21 @@ const App = {
 
     if (!confirmation) return;
 
-    // Phase 1: Delete from memory (metadata is embedded, no separate deletion needed)
     this.logsByPath.delete(path);
-
-    // Increment logs version to trigger re-render
     this.logsVersion += 1;
 
-    // Re-render logs
     this.renderLogs();
-
-    // Update cache
-    this.syncCacheFromMemory();
+    await this.syncCacheFromMemory();
 
     this.toast('Log deleted', 'success');
   },
 
-  // Phase 3: Smart Archival
   async checkAndArchiveOldLogs() {
     try {
       const logCount = await LogCache.getLogCount();
-
-      // Only archive if we have more than 200 logs
       if (logCount < 200) return;
 
       const oldLogs = await LogCache.getOldLogs(90); // Logs older than 90 days
-
-      // Archive if we have more than 100 old logs
       if (oldLogs.length > 100) {
         await this.archiveOldLogs(oldLogs);
       }
@@ -3627,10 +3531,8 @@ const App = {
       goals: Enhanced.getGoals()
     };
 
-    // Save archive to IndexedDB
     await LogCache.saveArchive(archiveData);
 
-    // Auto-download archive file
     const blob = new Blob([JSON.stringify(archiveData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -3641,11 +3543,9 @@ const App = {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 
-    // Delete archived logs from active storage
     const paths = logs.map(l => l.path);
     await LogCache.deleteLogsByPaths(paths);
 
-    // Remove from memory
     for (const path of paths) {
       this.logsByPath.delete(path);
     }
@@ -3656,9 +3556,7 @@ const App = {
     this.toast(`Archived ${logs.length} old logs (${startDate} to ${endDate})`, 'success');
   },
 
-  // Reports functionality
   showReports() {
-    // Initialize reports state if not exists
     if (!this.reportsState) {
       this.reportsState = {
         type: 'daily', // daily, weekly, monthly
@@ -3673,7 +3571,6 @@ const App = {
   switchReportType(type) {
     this.reportsState.type = type;
 
-    // Update active button
     document.querySelectorAll('.reports-type-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.type === type);
     });
@@ -3705,10 +3602,8 @@ const App = {
   renderCurrentReport() {
     const { type, date } = this.reportsState;
 
-    // Update date display
     this.updateReportDateDisplay();
 
-    // Generate report based on type
     let reportHTML = '';
     if (type === 'daily') {
       reportHTML = this.generateDailyReport(date);
@@ -3747,16 +3642,13 @@ const App = {
 
   generateDailyReport(date) {
     const logs = this.getLogsForDate(date);
-
     if (logs.length === 0) {
       return `<div class="report-empty">No logs for this day.</div>`;
     }
-
     const totalMs = logs.reduce((sum, log) => sum + (log.durationMs || 0), 0);
     const totalHours = (totalMs / (1000 * 60 * 60)).toFixed(2);
     const logCount = logs.length;
 
-    // Category breakdown
     const categoryTotals = {};
     logs.forEach(log => {
       const meta = this.getLogMetadata(log);
@@ -3781,7 +3673,6 @@ const App = {
       })
       .join('');
 
-    // Project breakdown
     const projectTotals = {};
     logs.forEach(log => {
       const meta = this.getLogMetadata(log);
@@ -3811,7 +3702,6 @@ const App = {
       .filter(Boolean)
       .join('');
 
-    // Energy distribution
     const energyTotals = { high: 0, medium: 0, low: 0 };
     logs.forEach(log => {
       const meta = this.getLogMetadata(log);
@@ -3841,10 +3731,8 @@ const App = {
       .filter(Boolean)
       .join('');
 
-    // Productivity score
     const productivityScore = Enhanced.calculateProductivityScore(logs, date);
 
-    // Goals
     const goals = Enhanced.getGoals();
     const dailyGoalHtml = goals.daily.enabled ? `
       <div class="report-metric">
@@ -3902,7 +3790,6 @@ const App = {
   },
 
   generateWeeklyReport(date) {
-    // Get start and end of week
     const startOfWeek = new Date(date);
     startOfWeek.setDate(date.getDate() - date.getDay());
     startOfWeek.setHours(0, 0, 0, 0);
@@ -3922,7 +3809,6 @@ const App = {
     const logCount = logs.length;
     const avgHoursPerDay = (parseFloat(totalHours) / 7).toFixed(2);
 
-    // Days breakdown
     const dayTotals = {};
     logs.forEach(log => {
       if (!log.date) return;
@@ -3946,8 +3832,8 @@ const App = {
       })
       .join('');
 
-    // Category breakdown
-    const categoryTotals = {};
+    
+  const categoryTotals = {};
     logs.forEach(log => {
       const meta = this.getLogMetadata(log);
       const category = meta?.category || 'other';
@@ -3972,8 +3858,8 @@ const App = {
       })
       .join('');
 
-    // Project breakdown
-    const projectTotals = {};
+    
+  const projectTotals = {};
     logs.forEach(log => {
       const meta = this.getLogMetadata(log);
       const projectId = meta?.project;
@@ -4003,8 +3889,8 @@ const App = {
       .filter(Boolean)
       .join('');
 
-    // Weekly goal
-    const goals = Enhanced.getGoals();
+    
+  const goals = Enhanced.getGoals();
     const weeklyGoalHtml = goals.weekly.enabled ? `
       <div class="report-metric">
         <div class="report-metric-label">Weekly Goal</div>
@@ -4060,8 +3946,8 @@ const App = {
   },
 
   generateMonthlyReport(date) {
-    // Get start and end of month
-    const startOfMonth = new Date(date.getFullYear(), date.getMonth(), 1);
+    
+  const startOfMonth = new Date(date.getFullYear(), date.getMonth(), 1);
     const endOfMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
 
     const logs = this.getLogsForDateRange(startOfMonth, endOfMonth);
@@ -4074,8 +3960,8 @@ const App = {
     const totalHours = (totalMs / (1000 * 60 * 60)).toFixed(2);
     const logCount = logs.length;
 
-    // Calculate working days in month
-    const dayTotals = {};
+    
+  const dayTotals = {};
     logs.forEach(log => {
       if (!log.date) return;
       dayTotals[log.date] = (dayTotals[log.date] || 0) + (log.durationMs || 0);
@@ -4083,8 +3969,8 @@ const App = {
     const workingDays = Object.keys(dayTotals).length;
     const avgHoursPerDay = workingDays > 0 ? (parseFloat(totalHours) / workingDays).toFixed(2) : 0;
 
-    // Week by week breakdown
-    const weekTotals = {};
+    
+  const weekTotals = {};
     logs.forEach(log => {
       if (!log.date) return;
       const logDate = new Date(log.date + 'T00:00:00');
@@ -4113,8 +3999,8 @@ const App = {
       })
       .join('');
 
-    // Category breakdown
-    const categoryTotals = {};
+    
+  const categoryTotals = {};
     logs.forEach(log => {
       const meta = this.getLogMetadata(log);
       const category = meta?.category || 'other';
@@ -4139,8 +4025,8 @@ const App = {
       })
       .join('');
 
-    // Project breakdown
-    const projectTotals = {};
+    
+  const projectTotals = {};
     logs.forEach(log => {
       const meta = this.getLogMetadata(log);
       const projectId = meta?.project;
@@ -4170,8 +4056,8 @@ const App = {
       .filter(Boolean)
       .join('');
 
-    // Monthly goal
-    const goals = Enhanced.getGoals();
+    
+  const goals = Enhanced.getGoals();
     const monthlyGoalHtml = goals.monthly.enabled ? `
       <div class="report-metric">
         <div class="report-metric-label">Monthly Goal</div>
@@ -4246,8 +4132,8 @@ const App = {
   exportCurrentReport() {
     const { type, date } = this.reportsState;
 
-    // Get report data
-    let reportData = {
+    
+  let reportData = {
       type,
       generatedAt: new Date().toISOString(),
       timezone: Time.getTimeZone()
@@ -4278,12 +4164,12 @@ const App = {
       reportData.totalHours = (logs.reduce((sum, log) => sum + (log.durationMs || 0), 0) / (1000 * 60 * 60)).toFixed(2);
     }
 
-    // Create filename
-    const dateStr = date.toISOString().split('T')[0];
+    
+  const dateStr = date.toISOString().split('T')[0];
     const filename = `worklog-${type}-report-${dateStr}.json`;
 
-    // Download
-    const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' });
+    
+  const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Worklog</title>
+  <meta name="description" content="Offline-first work time tracker - Privacy-focused, no external dependencies" />
+  <title>Worklog - Offline Work Tracker</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -218,14 +219,14 @@
   <div id="help-modal" class="modal hidden" aria-hidden="true">
     <div class="modal-card">
       <div class="modal-header">
-        <h2>About Worklog</h2>
+        <h2>About Worklog v2.0</h2>
       </div>
       <div class="help-text">
-        <p><strong>Worklog</strong> is a lightweight activity log for tracking your work time. When you're working, keep this tab open.</p>
-        <p>Every full interval (default 60 minutes, configurable), you will hear a beep and a modal will ask for a short note on what you worked on. Press <strong>Send</strong> to save it locally. If you forgot the tab open, press <strong>Erase</strong> to discard that time.</p>
-        <p>You can pause/resume at any time. Closing the tab ends the session.</p>
+        <p><strong>Worklog</strong> is a lightweight, offline-first activity logger for tracking your work time across projects.</p>
+        <p>Create logs whenever you want to document what you're working on. Logs are organized by project, and you can track time, categories, and energy levels.</p>
+        <p>The timer runs in the background to help you track elapsed time, but you control when to create logs - no interruptions!</p>
 
-        <p><strong>🔒 Local Mode:</strong> All your logs are stored in your browser's local storage. No data is sent to any server.</p>
+        <p><strong>🔒 Privacy First:</strong> All your logs are stored locally in your browser's IndexedDB. No data is sent to any server. Works completely offline.</p>
 
         <p><strong>✨ Features:</strong></p>
         <ul style="margin: 8px 0 16px 20px; line-height: 1.7;">
@@ -297,11 +298,12 @@
   </div>
 
   <div id="stats-modal" class="modal hidden" aria-hidden="true">
-    <div class="modal-card">
+    <div class="modal-card modal-card-large">
       <div class="modal-header">
         <h2>📊 Statistics</h2>
+        <button class="modal-close" data-close aria-label="Close">&times;</button>
       </div>
-      <div id="stats-content" class="help-text">
+      <div id="stats-content" class="help-text stats-content">
         <p>Loading statistics...</p>
       </div>
       <div class="modal-actions">

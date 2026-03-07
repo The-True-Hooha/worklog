@@ -334,3 +334,8 @@ const LogCache = {
     });
   }
 };
+
+// Make LogCache available globally
+if (typeof window !== 'undefined') {
+  window.LogCache = LogCache;
+}
