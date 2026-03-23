@@ -567,6 +567,12 @@
             <button class="reports-type-btn" data-type="monthly">Monthly</button>
           </div>
 
+          <div class="reports-project-filter">
+            <select id="reports-project" class="filter-select" title="Filter by project">
+              <option value="">All Projects</option>
+            </select>
+          </div>
+
           <div class="reports-date-controls">
             <button id="reports-prev" class="icon-btn" title="Previous period">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -591,6 +597,7 @@
 
       <div class="modal-actions">
         <button id="reports-export" class="primary">Export Report</button>
+        <button id="reports-copy">Copy Report</button>
         <button data-close>Close</button>
       </div>
     </div>

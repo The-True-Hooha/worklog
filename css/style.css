@@ -1301,6 +1301,71 @@ button.danger {
   font-size: 0.9rem;
 }
 
+.report-log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.report-log-item {
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+}
+
+.report-log-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.report-log-meta:last-child {
+  margin-bottom: 0;
+}
+
+.report-log-date {
+  font-family: var(--mono, monospace);
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.report-log-time {
+  font-family: var(--mono, monospace);
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.report-log-dur {
+  font-weight: 700;
+  color: var(--accent);
+  font-size: 0.82rem;
+}
+
+.report-log-tag {
+  background: var(--bg, #f5f5f5);
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.report-log-text {
+  font-size: 0.88rem;
+  color: var(--ink);
+  line-height: 1.45;
+}
+
 .report-insights {
   background: #f0f9ff;
   border: 1px solid #bae6fd;

@@ -289,7 +289,9 @@ const App = {
       reportsPrev: document.getElementById('reports-prev'),
       reportsNext: document.getElementById('reports-next'),
       reportsToday: document.getElementById('reports-today'),
-      reportsExport: document.getElementById('reports-export')
+      reportsExport: document.getElementById('reports-export'),
+      reportsProject: document.getElementById('reports-project'),
+      reportsCopy: document.getElementById('reports-copy')
     };
   },
 
@@ -316,6 +318,11 @@ const App = {
     this.elements.reportsNext.addEventListener('click', () => this.navigateReport(1));
     this.elements.reportsToday.addEventListener('click', () => this.navigateReportToToday());
     this.elements.reportsExport.addEventListener('click', () => this.exportCurrentReport());
+    this.elements.reportsCopy.addEventListener('click', () => this.copyCurrentReport());
+    this.elements.reportsProject.addEventListener('change', () => {
+      this.reportsState.projectId = this.elements.reportsProject.value;
+      this.renderCurrentReport();
+    });
     this.elements.cancelProjectBtn.addEventListener('click', () => this.hideProjectForm());
     this.elements.userPill.addEventListener('click', () => this.openProfile());
     this.elements.registerLog.addEventListener('click', () => this.submitLog());
@@ -3531,10 +3538,23 @@ const App = {
   showReports() {
     if (!this.reportsState) {
       this.reportsState = {
-        type: 'daily', // daily, weekly, monthly
-        date: new Date() // Current date for the report
+        type: 'daily',
+        date: new Date(),
+        projectId: ''
       };
     }
+
+    // Populate project dropdown
+    const projects = Enhanced.getProjects();
+    const sel = this.elements.reportsProject;
+    sel.innerHTML = '<option value="">All Projects</option>';
+    projects.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.name;
+      sel.appendChild(opt);
+    });
+    sel.value = this.reportsState.projectId || '';
 
     this.showModal(this.elements.reportsModal);
     this.renderCurrentReport();
@@ -3572,17 +3592,17 @@ const App = {
   },
 
   renderCurrentReport() {
-    const { type, date } = this.reportsState;
+    const { type, date, projectId } = this.reportsState;
 
     this.updateReportDateDisplay();
 
     let reportHTML = '';
     if (type === 'daily') {
-      reportHTML = this.generateDailyReport(date);
+      reportHTML = this.generateDailyReport(date, projectId);
     } else if (type === 'weekly') {
-      reportHTML = this.generateWeeklyReport(date);
+      reportHTML = this.generateWeeklyReport(date, projectId);
     } else if (type === 'monthly') {
-      reportHTML = this.generateMonthlyReport(date);
+      reportHTML = this.generateMonthlyReport(date, projectId);
     }
 
     this.elements.reportsContent.innerHTML = reportHTML;
@@ -3612,8 +3632,9 @@ const App = {
     this.elements.reportsDateDisplay.textContent = displayText;
   },
 
-  generateDailyReport(date) {
-    const logs = this.getLogsForDate(date);
+  generateDailyReport(date, projectId) {
+    let logs = this.getLogsForDate(date);
+    if (projectId) logs = logs.filter(l => l.project === projectId);
     if (logs.length === 0) {
       return `<div class="report-empty">No logs for this day.</div>`;
     }
@@ -3758,10 +3779,17 @@ const App = {
           ${energyBreakdown}
         </div>
       </div>` : ''}
+
+      <div class="report-section">
+        <h3>📋 Log Entries</h3>
+        <ul class="report-log-list">
+          ${this.buildLogListHTML(logs, false)}
+        </ul>
+      </div>
     `;
   },
 
-  generateWeeklyReport(date) {
+  generateWeeklyReport(date, projectId) {
     const startOfWeek = new Date(date);
     startOfWeek.setDate(date.getDate() - date.getDay());
     startOfWeek.setHours(0, 0, 0, 0);
@@ -3770,7 +3798,8 @@ const App = {
     endOfWeek.setDate(startOfWeek.getDate() + 6);
     endOfWeek.setHours(23, 59, 59, 999);
 
-    const logs = this.getLogsForDateRange(startOfWeek, endOfWeek);
+    let logs = this.getLogsForDateRange(startOfWeek, endOfWeek);
+    if (projectId) logs = logs.filter(l => l.project === projectId);
 
     if (logs.length === 0) {
       return `<div class="report-empty">No logs for this week.</div>`;
@@ -3914,15 +3943,23 @@ const App = {
           ${projectBreakdown}
         </div>
       </div>` : ''}
+
+      <div class="report-section">
+        <h3>📋 Log Entries</h3>
+        <ul class="report-log-list">
+          ${this.buildLogListHTML(logs, true)}
+        </ul>
+      </div>
     `;
   },
 
-  generateMonthlyReport(date) {
-    
+  generateMonthlyReport(date, projectId) {
+
   const startOfMonth = new Date(date.getFullYear(), date.getMonth(), 1);
     const endOfMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
 
-    const logs = this.getLogsForDateRange(startOfMonth, endOfMonth);
+    let logs = this.getLogsForDateRange(startOfMonth, endOfMonth);
+    if (projectId) logs = logs.filter(l => l.project === projectId);
 
     if (logs.length === 0) {
       return `<div class="report-empty">No logs for this month.</div>`;
@@ -4085,7 +4122,39 @@ const App = {
           ${projectBreakdown}
         </div>
       </div>` : ''}
+
+      <div class="report-section">
+        <h3>📋 Log Entries</h3>
+        <ul class="report-log-list">
+          ${this.buildLogListHTML(logs, true)}
+        </ul>
+      </div>
     `;
+  },
+
+  buildLogListHTML(logs, showDate) {
+    const projects = Enhanced.getProjects();
+    const sorted = [...logs].sort((a, b) => {
+      if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+      return (a.time || '') < (b.time || '') ? -1 : 1;
+    });
+    return sorted.map(log => {
+      const durH = Math.floor((log.durationMs || 0) / 3600000);
+      const durM = Math.floor(((log.durationMs || 0) % 3600000) / 60000);
+      const dur = durH > 0 ? `${durH}h ${durM}m` : `${durM}m`;
+      const catInfo = log.category ? (Enhanced.categories[log.category] || { icon: '📌', name: log.category }) : null;
+      const catTag = catInfo ? `<span class="report-log-tag">${catInfo.icon} ${catInfo.name}</span>` : '';
+      const energyInfo = log.energy ? Enhanced.energyLevels[log.energy] : null;
+      const energyTag = energyInfo ? `<span class="report-log-tag">${energyInfo.icon} ${energyInfo.name}</span>` : '';
+      const proj = projects.find(p => p.id === log.project);
+      const projTag = proj ? `<span class="report-log-tag" style="border-color:${proj.color};color:${proj.color};">● ${proj.name}</span>` : '';
+      const dateStr = showDate && log.date ? `<span class="report-log-date">${log.date}</span>` : '';
+      const timeStr = log.time ? `<span class="report-log-time">${log.time}</span>` : '';
+      return `<li class="report-log-item">
+            <div class="report-log-meta">${dateStr}${timeStr}<span class="report-log-dur">${dur}</span>${catTag}${projTag}${energyTag}</div>
+            ${log.text ? `<div class="report-log-text">${log.text}</div>` : ''}
+          </li>`;
+    }).join('');
   },
 
   getLogsForDate(date) {
@@ -4099,6 +4168,123 @@ const App = {
       const logDate = new Date(log.date + 'T00:00:00');
       return logDate >= startDate && logDate <= endDate;
     });
+  },
+
+  copyCurrentReport() {
+    const text = this.generateReportText();
+    navigator.clipboard.writeText(text).then(() => {
+      this.toast('Report copied to clipboard', 'success');
+    }).catch(() => {
+      this.toast('Failed to copy — try Export instead', 'error');
+    });
+  },
+
+  generateReportText() {
+    const { type, date, projectId } = this.reportsState;
+    const projects = Enhanced.getProjects();
+    const projectName = projectId ? (projects.find(p => p.id === projectId)?.name || projectId) : 'All Projects';
+
+    let logs = [];
+    let periodLabel = '';
+
+    if (type === 'daily') {
+      logs = this.getLogsForDate(date);
+      periodLabel = date.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    } else if (type === 'weekly') {
+      const startOfWeek = new Date(date);
+      startOfWeek.setDate(date.getDate() - date.getDay());
+      startOfWeek.setHours(0, 0, 0, 0);
+      const endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(startOfWeek.getDate() + 6);
+      endOfWeek.setHours(23, 59, 59, 999);
+      logs = this.getLogsForDateRange(startOfWeek, endOfWeek);
+      periodLabel = `${startOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${endOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    } else if (type === 'monthly') {
+      const startOfMonth = new Date(date.getFullYear(), date.getMonth(), 1);
+      const endOfMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
+      logs = this.getLogsForDateRange(startOfMonth, endOfMonth);
+      periodLabel = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    }
+
+    if (projectId) logs = logs.filter(l => l.project === projectId);
+
+    const lines = [];
+    const sep = '─'.repeat(52);
+
+    lines.push(`WORKLOG REPORT — ${type.toUpperCase()}`);
+    lines.push(sep);
+    lines.push(`Period:  ${periodLabel}`);
+    lines.push(`Project: ${projectName}`);
+    lines.push(`Generated: ${new Date().toLocaleString()}`);
+    lines.push('');
+
+    if (logs.length === 0) {
+      lines.push('No logs for this period.');
+      return lines.join('\n');
+    }
+
+    const totalMs = logs.reduce((sum, l) => sum + (l.durationMs || 0), 0);
+    const totalHours = (totalMs / 3600000).toFixed(2);
+
+    lines.push('SUMMARY');
+    lines.push(`  Total Hours : ${totalHours}h`);
+    lines.push(`  Log Count   : ${logs.length}`);
+    lines.push('');
+
+    // Category breakdown
+    const catTotals = {};
+    logs.forEach(l => {
+      const cat = l.category || 'other';
+      catTotals[cat] = (catTotals[cat] || 0) + (l.durationMs || 0);
+    });
+    const catEntries = Object.entries(catTotals).sort((a, b) => b[1] - a[1]);
+    if (catEntries.length) {
+      lines.push('BY CATEGORY');
+      catEntries.forEach(([cat, ms]) => {
+        const info = Enhanced.categories[cat] || { icon: '', name: cat };
+        const h = (ms / 3600000).toFixed(1);
+        const pct = ((ms / totalMs) * 100).toFixed(0);
+        lines.push(`  ${(info.icon + ' ' + info.name).padEnd(22)} ${h}h  (${pct}%)`);
+      });
+      lines.push('');
+    }
+
+    // Project breakdown (only when showing all projects)
+    if (!projectId) {
+      const projTotals = {};
+      logs.forEach(l => { if (l.project) projTotals[l.project] = (projTotals[l.project] || 0) + (l.durationMs || 0); });
+      const projEntries = Object.entries(projTotals).sort((a, b) => b[1] - a[1]);
+      if (projEntries.length) {
+        lines.push('BY PROJECT');
+        projEntries.forEach(([pid, ms]) => {
+          const proj = projects.find(p => p.id === pid);
+          const name = proj?.name || pid;
+          const h = (ms / 3600000).toFixed(1);
+          const pct = ((ms / totalMs) * 100).toFixed(0);
+          lines.push(`  ${name.padEnd(22)} ${h}h  (${pct}%)`);
+        });
+        lines.push('');
+      }
+    }
+
+    // Log entries
+    lines.push('LOG ENTRIES');
+    const sorted = [...logs].sort((a, b) => {
+      if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+      return (a.time || '') < (b.time || '') ? -1 : 1;
+    });
+    sorted.forEach(l => {
+      const durH = Math.floor((l.durationMs || 0) / 3600000);
+      const durM = Math.floor(((l.durationMs || 0) % 3600000) / 60000);
+      const dur = durH > 0 ? `${durH}h ${durM}m` : `${durM}m`;
+      const cat = l.category ? ` [${l.category}]` : '';
+      const energy = l.energy ? ` (${l.energy})` : '';
+      const proj = (!projectId && l.project) ? ` {${projects.find(p => p.id === l.project)?.name || l.project}}` : '';
+      lines.push(`  ${l.date || '?'} ${(l.time || '').padEnd(5)}  ${dur.padEnd(8)}${cat}${energy}${proj}`);
+      if (l.text) lines.push(`    ${l.text}`);
+    });
+
+    return lines.join('\n');
   },
 
   exportCurrentReport() {
